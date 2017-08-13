@@ -7,24 +7,230 @@ output: html_document
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
+library(dplyr)
+library(ggplot2)
+library(caret)
+library(Hmisc)
 ```
 
-## R Markdown
+## Executive Summary
 
-This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+The purpose of this project was to build a model in order to predict the manner in which an individual performed an exercise. The data used to build this model came from the **Weight Lifting Exercises Dataset** provided by  [Groupware@LES](http://groupware.les.inf.puc-rio.br/har). 
 
-When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+The following steps were undertaken to build this model:
 
-```{r cars}
-summary(cars)
+1. Investigating training data set
+2. Exploratory analysis
+3. Variable selection
+4. Model selection
+5. Model development and validation
+
+A majority of the work involved was in steps 1 and 2. 
+
+## Investigating Training Data Set
+
+The main purpose of this step was to identify if there were any variables that could be immediately dropped from the process (e.g., due to missings) prior to **exploratory analysis**. The table consisted of 160 variables and, in an effort to streamline the exploratory analysis, the hope was to reduce this number. 
+
+Only the training data set was brought in for review:
+
+```{r dataIn, results='hide'}
+origTraining <- read.table("./pml-training.csv", sep = ",", header = TRUE)
+
+str(origTraining)
 ```
 
-## Including Plots
+The information provided from the **str** function suggested which variables might have a large number of NAs or missing (i.e., 'empty') values. The following code below is an example of a _numeric_ variable (min_roll_dumbbell) being analyzed:
 
-You can also embed plots, for example:
+```{r naNum, results='hide'}
+# Step 1 - Review summary table of high NA variable and get a count of
+# number of NAs
+summary(origTraining$min_roll_dumbbell)
 
-```{r pressure, echo=FALSE}
-plot(pressure)
+# Step 2 - Calculate percent NA
+perNA1 <- sum(is.na(origTraining$min_roll_dumbbell))/nrow(origTraining)
+perNA1
+
+sum(is.na(origTraining$min_roll_dumbbell))
 ```
 
-Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+The above code was performed on all numeric and integer variables. The code below was used to assess the variable that were factor but contained missing or odd values (#DIV/0!):
+
+```{r missFactor, results='hide'}
+# Step 1 - Review summary table of factor variable and get a sense
+# to number of missing
+summary(origTraining$skewness_roll_dumbbell)
+
+# Step 2 - Subset data frame by accounts that have missing values for 
+# factor.
+remainingRow <- origTraining[origTraining$skewness_roll_dumbbell != '',]
+
+# Calculate percent (note: since removing the missing we have to do
+# 1 - remaining to get percent missing)
+perNA2 <- 1 - (nrow(remainingRow)/nrow(origTraining))
+perNA2
+```
+It was determined that variables with a large percent *(75% or more)* of NA or missing values would be excluded from the analysis. Given the analysis of the above a large number of variables could be removed from the training data because of their high number of NAs or missing values. 
+
+A majority of these variables had statistical metrics assigned to their name, e.g., avg or min or max. Therefore, the code below identifies these variables and removes them from the training table.
+
+```{r badVars, results='hide'}
+# This greps for variables that, after using str(), appear to be mostly NA
+reviewTrain1 <- origTraining[grep("^avg_|^stddev_|^var_|^min_|^max_|^amplitude_|^kurtosis_|^skewness_", names(origTraining))]
+
+# Uses str() on the resulting table to confirm most are NA
+str(reviewTrain1)
+
+# Identify variables that met grep condition
+toDropVars1 <- names(reviewTrain1)
+
+# Remove variables from the training data set
+modTrain1 <- origTraining[, !colnames(origTraining) %in% toDropVars1]
+```
+
+After dropping the above variables a review of the data occurred. There were a few variables related to time that were removed from the table because, given the nature of the data and the purpose of the prediciton algorithm, it did not seem appropriate to consider a time series element.
+
+```{r dateVars, results='hide'}
+# Date variables removed 
+toDropVars2 <- c("cvtd_timestamp", "raw_timestamp_part_2", "raw_timestamp_part_1")
+
+# Remove from training data
+modTrain2 <-  modTrain1[, !colnames(modTrain1) %in% toDropVars2]
+```
+
+A final training table was created containing 57 variables (down from the original 160) of mostly numeric and interger variables. For consistency sake, it is noted now (although anlaysis came later) that the variable **new_window** found from **nearZeroVar**  and the variable **user_name** from summary distribution analysis could be removed. 
+
+```{r finalDrops, results='hide'}
+# user_name across classe found mostly equal distribution
+toDropVars3 <- c("new_window", "user_name")
+modTrain3 <- modTrain2[, !colnames(modTrain2) %in% toDropVars3]
+str(modTrain3)
+```
+
+## Exploratory Data Analysis
+
+After the training data set had over 100 variables reduced given the steps above, it was time to perform exploratory data analysis. The purpose of this was to:
+
+1. Identify outliers
+2. Identify patterns (i.e., non-linearity) that could determine the type of prediction algorithm to use
+3. Identfy variables that behave differently across **classe** groups
+
+To accomplish this these steps were taken:
+
+1. Feature plots were built for similar variables (e.g., gyros belt data on x/y/z axis plotted together with classe)
+2. Box plots were performed on similiar variables to identify variance across classe groups
+3. Histograms were used to identify normality or other behavior.
+
+The below is an example of the code used for the **feature plot**. Note the non-linear relationship across some of the variables (**classe** colors the data points).
+
+```{r exFeatPlot}
+# Look at FOREARM data
+forearmData1 <- modTrain3[grep("_forearm", names(modTrain3))]
+
+forearmData2 <- cbind(forearmData1, modTrain3$classe)
+
+# Roll/pitch/yaw/total_acc -- yaw/pitch/row have odd behavior
+featurePlot(x=forearmData2[,1:4],
+            y = forearmData2[,14],
+            plot="pairs")
+```
+
+Box-plots were used to determine which variables might be good at separting out impacts on the **classe** variable. The code below is an example of what was used. Note: this particular variable (*magnet_belt_z*) appears to have greater variability for groups **D** and **EE**.
+
+```{r exBoxPlot}
+p1 <- qplot(modTrain3$classe, 
+            modTrain3$magnet_belt_z,
+            data=modTrain3,
+            fill=modTrain3$classe,
+            geom=c("boxplot","jitter"))
+p1
+```
+
+As with box-plots, the histograms show the amount of volatility that certain variables have for different **classe** values. Those histograms that show different behavior among the **classe** groups suggest they will probably be good to include in model. Note the difference in patterns amongst the groups.
+
+```{r exHist}
+qplot(magnet_forearm_x,colour=classe,data=modTrain3,geom="density")
+```
+
+One final graph is going to be shown - that of the variable **X**. I was unable to access the website for a data dictionary (if there is one) but I found the behavior of this variable odd. After thinking about it I reached the conclusion that this variable is a "row number" and indicates how the **classe group** was being loaded into the data set (i.e., one group at a time). *To include this variable into the analysis would give false strength to the model - while there is a relationship it would be useless for prediction*.
+
+```{r badX}
+p1 <- qplot(modTrain3$classe, 
+            modTrain3$X,
+            data=modTrain3,
+            fill=modTrain3$classe,
+            geom=c("boxplot","jitter"))
+p1
+```
+
+## Variable Selection
+From the above analysis it was noted that there were a couple of observations that contained outlier information. They were excluded from the training set.
+
+```{r dropObs, results='hide'}
+# Remove observations with outliers in the variables gyros_forearm_y and 
+# gyros_forearm_z
+modTrain4 <- filter(modTrain3, gyros_forearm_y < 8 | gyros_forearm_z < 9)
+nrow(modTrain4)
+
+# Remove observations with outliers in the variables magnet_dumbbell_y
+modTrain5 <- filter(modTrain4, magnet_dumbbell_y > -3000)
+nrow(modTrain5)
+```
+
+In addition, the above analysis also allowed a final set of variables to be identified. Those variables can be seen in the code below:
+
+```{r finalVars, results='hide'}
+finalKeepVars = c("roll_belt", "gyros_belt_y", "gyros_belt_z", "accel_belt_x", 
+                  "accel_belt_z", "magnet_belt_y", "magnet_belt_z", "roll_forearm", 
+                  "pitch_forearm", "magnet_forearm_x", "magnet_forearm_z", "gyros_arm_y",
+                  "accel_dumbbell_x", "accel_dumbbell_z", "magnet_dumbbell_x", 
+                  "magnet_dumbbell_z", "total_accel_dumbbell", "classe")
+
+training <- modTrain5[, colnames(modTrain5) %in% finalKeepVars]
+str(training)
+```
+
+In summary, the data set being used for building the model contains:
+
+1. 17 predictor variables (down from 159)
+2. 19,620 observations (down from 19,622)
+
+## Model Selection
+
+It was determined that a **Random Forest** algorithm would be used for building the model and prediction purposes. It was chosen because:
+
+1. It uses decision trees which are non-linear models and there is evidence of non-linearity in the data
+2. The dependent variable is a factor variable
+3. Data transformations are not important so no need to do normalization or box-cox transforms
+4. Its accuracy strength
+
+## Model Build and Validation
+
+The following code was used to build the random forest predictor. Due to the concern of overfitting k-folds cross validation was used (the **fitControl** object). The number of folds was set to 10 in order to reduce the bias. 
+
+```{r theModel, results='hide'}
+set.seed(8675309)
+
+# Specifies k-folds cross validation
+fitControl <- trainControl(method = "cv", number = 10)
+
+rfModFit <- train(classe ~ ., data = training, 
+                  method = "rf",
+                  trControl = fitControl,
+                  prox = FALSE) 
+
+```
+
+A summary of the model information can be found below along with the confusion matrix output:
+
+```{r theOutput}
+rfModFit
+
+predictTrain <- predict(rfModFit, newdata=training)
+confusionMatrix(training$classe, predictTrain)
+```
+
+While the model shows a good fit on the training data (possibly overfitting) an estimate of the error rate can be obtained. For random forest to get an unbiased estimate of test set error one use the **out-of-bag (oob)** error estimate. The code below shows how to obtain this out of sample error (i.e., **1.21%**):
+
+```{r theOOB}
+rfModFit$finalModel
+```
