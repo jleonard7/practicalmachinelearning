@@ -1,0 +1,61 @@
+---
+title: "Bank Total Assets and Market Cap"
+author: "jleonard07"
+date: "8/17/2017"
+output: ioslides_presentation
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+library(plotly)
+```
+
+## Purpose of Presentation
+
+The purpose of the presentation is to perform an initial review of total assets and market cap for the top 31 banks in the US.
+
+The data set used came from a combination of tables from [List of largest banks in the United States](https://en.wikipedia.org/wiki/List_of_largest_banks_in_the_United_States) on Wikipedia.
+
+## Data process
+
+To prepare the data for plotting these following steps were taken:
+
+1. Join the two tables (from the website) together. This occurred outside of R.
+2. Create a factor variable value based on the total assets for a bank.
+3. Scale `market_cap` variable.
+
+The code below shows this process:
+
+```{r data, echo=TRUE}
+bankData <- read.csv("./bank_assets1.csv", sep = ",", header = TRUE)
+bankData$size <- ifelse(bankData$total_assets > 270, "large",
+                          ifelse(bankData$total_assets > 100, 
+                                 "mid-size", "small"))
+bankData$scaled_mc <- sqrt(bankData$market_cap)
+
+```
+
+## Total Assets
+
+The plot below shows the ranks of the banks on the x-axis and the total assets on the y-axis. The size of the bubble indicates its market capital.
+
+```{r ta_plot}
+plot_ly(bankData, x = ~rank, y = ~total_assets, type = "scatter",
+        mode = 'markers', text = ~name,
+        marker = list(size=~scaled_mc, opacity=0.5))
+```
+
+## Box Plots on Total Assets
+The box plots below are for the three levels of the size factor. The large variance in the *large* group is not surprising - only a handful of banks exceed $1,700b in total assets.
+
+```{r box_ta}
+plot_ly(bankData, y = ~total_assets, color = ~size, type = "box")
+```
+
+## Box Plots on Market Cap
+
+These show that market cap distributions _mostly_ follow that of total assets. However, there are a couple of outliers.  
+
+```{r box_mc}
+plot_ly(bankData, y = ~market_cap, color = ~size, type = "box")
+```
