@@ -1,0 +1,76 @@
+---
+title: "Imputation and Its Impact on Model Estimation"
+author: "jleonard07"
+date: "8/26/2017"
+output: 
+  ioslides_presentation:
+    css: styles.css
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+library(plotly)
+```
+
+## Purpose of Shiny App
+
+The purpose of the Shiny application is to provide a tool to develop intution about how imputation methods can impact model estimation. This will be shown by:
+
+* Allowing the user to select:
+      + What percentage of values in a given variable should be replaced with NA.
+      + Which statistic, derived from the remaining values of the variable, to use to replace the NAs
+* Providing the user the ability to toggle between:
+      + Regression results for the estimations using the original data and imputed data
+      + Scatter plots of the original data and imputed data
+
+
+Before proceeding further it should be noted that while the basic idea behind [_imputation_](https://en.wikipedia.org/wiki/Imputation_%28statistics%29) and  [_interpolation_](https://en.wikipedia.org/wiki/Interpolation) is the same (i.e., creating a value where one did not exist before), there is one key distinction. The former **replaces** a missing value with a substitute; the latter **creates** a value between two end points.  
+
+## Imputation Methods
+
+There are a variety of methods used for _single_ imputation (in which only _one_ with missing values gets replacements). Some examples are:
+
+
++------------------+------------------------------------+
+| Single Imputation| Description                        |
+|      Type        |                                    |
++==================+====================================+
+| **Mean-value**   | Use the **mean** of non-missing values |
+|                  | as replacement                     |
++------------------+------------------------------------+
+|**Hot-decking**   | Replace missing values from similar|
+|                  | observations _in sample_:          |    
+|                  |                                    |   
+|                  | + There are different way to do    |
+|                  | this                               |
+|                  | + Replacing with _out of sample_ is|
+|                  | called **cold-decking**            |
++------------------+------------------------------------+
+|**Regression**    | Use a univariate or multivariate   |
+|                  | regression model to estimate the   |    
+|                  | missing variable.                  |
+|                  |                                    |
+|                  | + The independent variables are 1  |
+|                  | or more of the variables in data   |
+|                  | set                                |   
++------------------+------------------------------------+
+
+For the purpose of this exploration, **mean-value** and variations on that theme (e.g., min, max, mode) will be used.
+
+## Data Used
+
+To build the intuition the data set used was **LifeCycleSavings** from the R Datasets Package. The data set contains the following variables:
+
+```{r data, echo=TRUE}
+str(LifeCycleSavings)
+```
+
+For the purpose of exploration, the independent variable will be _ddpi_ (percent growth of disposable income) and the dependent variable will be _sr_ (savings rate).
+
+## Relationship of DDPI to Savings Rate
+From the plot below one can see that there is a positive, linear relationship between _ddpi_ and _sr_. The question is: what happens to the relationship when missing values are replaced with the mean, min, max, or median...?
+
+```{r scatter_plot, message=FALSE, fig.height=4, fig.width=7}
+p <- plot_ly(data = LifeCycleSavings, x = ~ddpi, y = ~sr)
+p
+```
